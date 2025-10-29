@@ -1,0 +1,338 @@
+--// GODLOCK v20 - FULL AUTO & NO RECOIL REMOVED (Clean & Optimized)
+
+--// SERVICES
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+--// SETTINGS
+local Settings = {
+    Aimbot = false,
+    WallCheck = false,
+    ESP = false,
+    FOV = 110,
+    ESPRange = math.huge,
+    LockPart = "Head",
+    TeamCheckAimbot = true,
+    ESPTeamCheck = true,
+    AimYOffset = 0,
+}
+
+--// STATE
+local targetPart = nil
+local currentTool = nil
+local frameCount = 0
+
+--// CACHED DATA
+local playerList = Players:GetPlayers()
+local espTable = {}
+local centerScreen = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+
+--// UTILITIES
+local function getLockPart(char)
+    return char:FindFirstChild(Settings.LockPart) 
+        or char:FindFirstChild("Head") 
+        or char:FindFirstChild("UpperTorso")
+end
+
+local function isEnemy(plr, forAimbot)
+    local check = forAimbot and Settings.TeamCheckAimbot or Settings.ESPTeamCheck
+    if not check then return true end
+    if not LocalPlayer.Team or not plr.Team then return true end
+    return LocalPlayer.Team ~= plr.Team
+end
+
+local function isVisible(part)
+    if not Settings.WallCheck then return true end
+    local origin = Camera.CFrame.Position
+    local dir = (part.Position - origin).Unit * 500
+    local ray = Ray.new(origin, dir)
+    local hit = Workspace:FindPartOnRayWithIgnoreList(ray, {LocalPlayer.Character or {}})
+    return hit and hit:IsDescendantOf(part.Parent)
+end
+
+--// TARGET ACQUISITION
+local function getTarget()
+    local closest = nil
+    local shortest = math.huge
+
+    for _, plr in playerList do
+        if plr ~= LocalPlayer and plr.Character then
+            local hum = plr.Character:FindFirstChild("Humanoid")
+            if hum and hum.Health > 0 and isEnemy(plr, true) then
+                local part = getLockPart(plr.Character)
+                if part and isVisible(part) then
+                    local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                    if onScreen then
+                        local dist = (Vector2.new(pos.X, pos.Y) - centerScreen).Magnitude
+                        if dist <= Settings.FOV and dist < shortest then
+                            shortest = dist
+                            closest = part
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+--// TOOL UPDATE
+local function updateTool()
+    currentTool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+end
+
+--// ESP SETUP
+local function makeESP(plr)
+    if espTable[plr] then return end
+    local box = Drawing.new("Square")
+    box.Thickness = 2
+    box.Filled = false
+    box.Color = Color3.fromRGB(255, 0, 0)
+    local line = Drawing.new("Line")
+    line.Thickness = 1
+    line.Color = Color3.fromRGB(255, 0, 0)
+    espTable[plr] = {box = box, line = line}
+end
+
+for _, p in playerList do
+    if p ~= LocalPlayer then makeESP(p) end
+end
+Players.PlayerAdded:Connect(makeESP)
+Players.PlayerRemoving:Connect(function(p)
+    if espTable[p] then
+        espTable[p].box:Remove()
+        espTable[p].line:Remove()
+        espTable[p] = nil
+    end
+end)
+
+--// UI (Full Auto & No Recoil buttons REMOVED)
+local gui = Instance.new("ScreenGui")
+gui.Name = "GodlockV20"
+gui.ResetOnSpawn = false
+gui.Parent = CoreGui
+
+local panel = Instance.new("Frame")
+panel.Size = UDim2.new(0, 500, 0, 300)
+panel.Position = UDim2.new(0.5, -250, 0.5, -150)
+panel.BackgroundColor3 = Color3.fromRGB(14,14,14)
+panel.Active = true
+panel.Draggable = true
+panel.Parent = gui
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0,8)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -10, 0, 30)
+title.Position = UDim2.new(0, 5, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "GODLOCK v20 - CLEAN"
+title.TextColor3 = Color3.fromRGB(255,255,255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 18
+title.Parent = panel
+
+local function btn(name, key, y)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, 150, 0, 25)
+    b.Position = UDim2.new(0, 10, 0, y)
+    b.Text = name..": OFF"
+    b.BackgroundColor3 = Color3.fromRGB(30,30,30)
+    b.TextColor3 = Color3.fromRGB(220,220,220)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 14
+    b.Parent = panel
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0,4)
+    b.MouseButton1Click:Connect(function()
+        Settings[key] = not Settings[key]
+        b.Text = name..": "..(Settings[key] and "ON" or "OFF")
+    end)
+end
+
+btn("Aimbot", "Aimbot", 40)
+btn("Wall Check", "WallCheck", 70)
+btn("ESP (All)", "ESP", 100)
+btn("Team Check Aimbot", "TeamCheckAimbot", 130)
+btn("ESP Team Check", "ESPTeamCheck", 160)
+
+-- Y Offset
+local yLabel = Instance.new("TextLabel")
+yLabel.Size = UDim2.new(0,50,0,25)
+yLabel.Position = UDim2.new(0,170,0,40)
+yLabel.BackgroundColor3 = Color3.fromRGB(30,30,30)
+yLabel.Text = "0.0"
+yLabel.TextColor3 = Color3.fromRGB(220,220,220)
+yLabel.Font = Enum.Font.GothamBold
+yLabel.TextSize = 14
+yLabel.Parent = panel
+Instance.new("UICorner", yLabel).CornerRadius = UDim.new(0,4)
+
+local function yBtn(sym, val)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0,25,0,25)
+    b.BackgroundColor3 = Color3.fromRGB(30,30,30)
+    b.Text = sym
+    b.TextColor3 = Color3.fromRGB(220,220,220)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 16
+    b.Parent = panel
+    b.MouseButton1Click:Connect(function()
+        Settings.AimYOffset += val
+        yLabel.Text = string.format("%.1f", Settings.AimYOffset)
+    end)
+    return b
+end
+yBtn("-", -0.5).Position = UDim2.new(0,230,0,40)
+yBtn("+", 0.5).Position = UDim2.new(0,280,0,40)
+
+-- FOV
+local fovLabel = Instance.new("TextLabel")
+fovLabel.Size = UDim2.new(0,50,0,25)
+fovLabel.Position = UDim2.new(0,170,0,70)
+fovLabel.BackgroundColor3 = Color3.fromRGB(30,30,30)
+fovLabel.Text = "200"
+fovLabel.TextColor3 = Color3.fromRGB(220,220,220)
+fovLabel.Font = Enum.Font.GothamBold
+fovLabel.TextSize = 14
+fovLabel.Parent = panel
+Instance.new("UICorner", fovLabel).CornerRadius = UDim.new(0,4)
+
+local function fovBtn(sym, val)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0,25,0,25)
+    b.BackgroundColor3 = Color3.fromRGB(30,30,30)
+    b.Text = sym
+    b.TextColor3 = Color3.fromRGB(220,220,220)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 16
+    b.Parent = panel
+    b.MouseButton1Click:Connect(function()
+        Settings.FOV = math.clamp(Settings.FOV + val, 50, 500)
+        fovLabel.Text = tostring(Settings.FOV)
+    end)
+    return b
+end
+fovBtn("-", -20).Position = UDim2.new(0,230,0,70)
+fovBtn("+", 20).Position = UDim2.new(0,280,0,70)
+
+-- Toggle Circle
+local circle = Instance.new("TextButton")
+circle.Size = UDim2.new(0,60,0,60)
+circle.Position = UDim2.new(1,-80,0,50)
+circle.BackgroundColor3 = Color3.fromRGB(200,20,20)
+circle.Text = "X"
+circle.TextColor3 = Color3.fromRGB(255,255,255)
+circle.Font = Enum.Font.GothamBold
+circle.TextSize = 14
+circle.Parent = gui
+Instance.new("UICorner", circle).CornerRadius = UDim.new(1,0)
+
+local dragStart, startPos
+circle.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        dragStart = i.Position
+        startPos = circle.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if dragStart and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+        local delta = i.Position - dragStart
+        circle.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        dragStart = nil
+    end
+end)
+circle.MouseButton1Click:Connect(function()
+    panel.Visible = not panel.Visible
+    circle.Text = panel.Visible and "X" or "O"
+end)
+
+-- FOV Circle
+local fovCircle = Drawing.new("Circle")
+fovCircle.Thickness = 2
+fovCircle.Color = Color3.fromRGB(200,20,20)
+fovCircle.Filled = false
+fovCircle.Visible = false
+
+--// MAIN LOOP (30 FPS effective, no Full Auto/No Recoil)
+RunService.Heartbeat:Connect(function()
+    frameCount += 1
+    if frameCount % 2 ~= 0 then return end
+
+    local cam = Camera
+    if not cam then return end
+
+    updateTool()
+    targetPart = getTarget()
+
+    -- Aimbot
+    if Settings.Aimbot and targetPart then
+        local pos = targetPart.Position + Vector3.new(0, Settings.AimYOffset, 0)
+        local current = cam.CFrame
+        cam.CFrame = current:Lerp(CFrame.lookAt(current.Position, pos), 0.95)
+    end
+
+    -- FOV Circle
+    fovCircle.Position = centerScreen
+    fovCircle.Radius = Settings.FOV
+    fovCircle.Visible = Settings.Aimbot
+
+    -- ESP
+    if Settings.ESP then
+        for plr, esp in espTable do
+            local char = plr.Character
+            if char and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 and isEnemy(plr, false) then
+                local root = getLockPart(char)
+                if root and (cam.CFrame.Position - root.Position).Magnitude <= Settings.ESPRange then
+                    local rootPos, onScreen = cam:WorldToViewportPoint(root.Position)
+                    if onScreen then
+                        local head = char:FindFirstChild("Head")
+                        local headPos = head and cam:WorldToViewportPoint(head.Position) or rootPos
+                        local h = math.abs(rootPos.Y - headPos.Y)
+                        local w = h / 2
+
+                        esp.box.Visible = true
+                        esp.box.Size = Vector2.new(w, h)
+                        esp.box.Position = Vector2.new(rootPos.X - w/2, math.min(rootPos.Y, headPos.Y))
+
+                        esp.line.Visible = true
+                        esp.line.From = Vector2.new(centerScreen.X, cam.ViewportSize.Y)
+                        esp.line.To = Vector2.new(rootPos.X, rootPos.Y)
+                    else
+                        esp.box.Visible = false
+                        esp.line.Visible = false
+                    end
+                else
+                    esp.box.Visible = false
+                    esp.line.Visible = false
+                end
+            else
+                esp.box.Visible = false
+                esp.line.Visible = false
+            end
+        end
+    else
+        for _, esp in espTable do
+            esp.box.Visible = false
+            esp.line.Visible = false
+        end
+    end
+end)
+
+--// INIT
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    updateTool()
+end)
+
+updateTool()
+
+print("GODLOCK v20 CLEAN - Full Auto & No Recoil REMOVED, Optimized & Stable")
