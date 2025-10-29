@@ -1,0 +1,416 @@
+--// GODLOCK v20 - Safe + GUI fix
+--// SERVICES
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+--// SETTINGS
+local Settings = {
+    Aimbot = false,
+    WallCheck = false,
+    ESP = false,
+    FOV = 200,
+    ESPRange = 1000,
+    LockPart = "Head",
+    TeamCheckAimbot = true,
+    ESPTeamCheck = true,
+    AimYOffset = 0,
+    AimLerp = 0.95
+}
+
+--// STATE
+local targetPart = nil
+local playerList = {}
+local espTable = {}
+local centerScreen = Vector2.new(0,0)
+local ignoreList = {}
+local visCache = {} -- [player] = {visible = bool, ts = tick()}
+
+--// PLAYER CACHE
+local function updatePlayerCache()
+    playerList = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer then
+            table.insert(playerList, plr)
+        end
+    end
+end
+updatePlayerCache()
+Players.PlayerAdded:Connect(updatePlayerCache)
+Players.PlayerRemoving:Connect(function(p)
+    updatePlayerCache()
+    if espTable[p] then
+        if espTable[p].box then pcall(function() espTable[p].box:Remove() end) end
+        if espTable[p].line then pcall(function() espTable[p].line:Remove() end) end
+        espTable[p] = nil
+    end
+    visCache[p] = nil
+end)
+
+--// UTILITIES
+local function getLockPart(char)
+    if not char then return nil end
+    return char:FindFirstChild(Settings.LockPart) or char:FindFirstChild("Head") or char:FindFirstChild("UpperTorso")
+end
+
+local function isEnemy(plr, forAimbot)
+    local check = forAimbot and Settings.TeamCheckAimbot or Settings.ESPTeamCheck
+    if not check then return true end
+    if not LocalPlayer.Team or not plr.Team then return true end
+    return LocalPlayer.Team ~= plr.Team
+end
+
+local function cachedVisibleCheck(plr, part)
+    local now = tick()
+    local cache = visCache[plr]
+    if cache and (now - cache.ts) < 0.5 then
+        return cache.visible
+    end
+    local result = false
+    if not Settings.WallCheck then
+        result = true
+    else
+        local ok, ray = pcall(function()
+            local params = RaycastParams.new()
+            params.FilterType = Enum.RaycastFilterType.Exclude
+            params.FilterDescendantsInstances = ignoreList
+            return Workspace:Raycast(Camera.CFrame.Position, (part.Position - Camera.CFrame.Position).Unit * 500, params)
+        end)
+        if ok and ray and ray.Instance then
+            result = ray.Instance:IsDescendantOf(part.Parent)
+        else
+            result = false
+        end
+    end
+    visCache[plr] = {visible = result, ts = now}
+    return result
+end
+
+local function isVisible(part, plr)
+    if not part then return false end
+    if not Settings.WallCheck then return true end
+    return cachedVisibleCheck(plr, part)
+end
+
+local function getTarget()
+    local closest, shortest = nil, math.huge
+    for _, plr in ipairs(playerList) do
+        if plr and plr ~= LocalPlayer and isEnemy(plr, true) then
+            local ok, char = pcall(function() return plr.Character end)
+            if not ok or not char then goto continue end
+            local hum = char:FindFirstChild("Humanoid")
+            if not hum or hum.Health <= 0 then goto continue end
+            local part = getLockPart(char)
+            if not part then goto continue end
+            if not isVisible(part, plr) then goto continue end
+            local ok2, pos, onScreen = pcall(function()
+                return Camera:WorldToViewportPoint(part.Position)
+            end)
+            if not ok2 then goto continue end
+            if onScreen then
+                local dist = (Vector2.new(pos.X, pos.Y) - centerScreen).Magnitude
+                if dist <= Settings.FOV and dist < shortest then
+                    shortest = dist
+                    closest = part
+                end
+            end
+        end
+        ::continue::
+    end
+    return closest
+end
+
+--// ESP creation
+local function makeESP(plr)
+    if espTable[plr] then return end
+    local box = Drawing.new("Square")
+    box.Thickness = 2
+    box.Filled = false
+    box.Color = Color3.fromRGB(255,0,0)
+    box.Visible = false
+    local line = Drawing.new("Line")
+    line.Thickness = 1
+    line.Color = Color3.fromRGB(255,0,0)
+    line.Visible = false
+    espTable[plr] = {box = box, line = line}
+end
+
+for _, p in ipairs(playerList) do makeESP(p) end
+Players.PlayerAdded:Connect(function(p)
+    if p ~= LocalPlayer then makeESP(p) end
+end)
+
+--// GUI
+-- wait until PlayerGui exists
+local guiParent = nil
+repeat
+    guiParent = LocalPlayer:FindFirstChild("PlayerGui")
+    task.wait(0.1)
+until guiParent
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "GodlockV20"
+gui.ResetOnSpawn = false
+gui.Parent = guiParent
+
+local panel = Instance.new("Frame")
+panel.Size = UDim2.new(0,500,0,300)
+panel.Position = UDim2.new(0.5,-250,0.5,-150)
+panel.BackgroundColor3 = Color3.fromRGB(14,14,14)
+panel.Active = true
+panel.Draggable = true
+panel.Parent = gui
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0,8)
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1,-10,0,30)
+title.Position = UDim2.new(0,5,0,0)
+title.BackgroundTransparency = 1
+title.Text = "GODLOCK v20 - Optimized"
+title.TextColor3 = Color3.fromRGB(255,255,255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 18
+title.Parent = panel
+
+local function makeToggle(name,key,y)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0,150,0,25)
+    b.Position = UDim2.new(0,10,0,y)
+    b.BackgroundColor3 = Color3.fromRGB(30,30,30)
+    b.TextColor3 = Color3.fromRGB(220,220,220)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 14
+    b.Parent = panel
+    Instance.new("UICorner",b).CornerRadius = UDim.new(0,4)
+    local function updateText()
+        b.Text = name..": "..(Settings[key] and "ON" or "OFF")
+    end
+    updateText()
+    b.MouseButton1Click:Connect(function()
+        Settings[key] = not Settings[key]
+        if key == "WallCheck" then visCache = {} end
+        updateText()
+    end)
+    return b
+end
+
+makeToggle("Aimbot","Aimbot",40)
+makeToggle("Wall Check","WallCheck",70)
+makeToggle("ESP (All)","ESP",100)
+makeToggle("Team Check Aimbot","TeamCheckAimbot",130)
+makeToggle("ESP Team Check","ESPTeamCheck",160)
+
+-- Y Offset
+local yLabel = Instance.new("TextLabel")
+yLabel.Size = UDim2.new(0,50,0,25)
+yLabel.Position = UDim2.new(0,170,0,70)
+yLabel.BackgroundColor3 = Color3.fromRGB(30,30,30)
+yLabel.Text = string.format("%.1f", Settings.AimYOffset)
+yLabel.TextColor3 = Color3.fromRGB(220,220,220)
+yLabel.Font = Enum.Font.GothamBold
+yLabel.TextSize = 14
+yLabel.Parent = panel
+Instance.new("UICorner",yLabel).CornerRadius = UDim.new(0,4)
+
+local function yBtn(sym,val)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0,25,0,25)
+    b.BackgroundColor3 = Color3.fromRGB(30,30,30)
+    b.Text = sym
+    b.TextColor3 = Color3.fromRGB(220,220,220)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 16
+    b.Parent = panel
+    Instance.new("UICorner",b).CornerRadius = UDim.new(0,4)
+    b.MouseButton1Click:Connect(function()
+        Settings.AimYOffset = Settings.AimYOffset + val
+        yLabel.Text = string.format("%.1f", Settings.AimYOffset)
+    end)
+    return b
+end
+yBtn("-", -0.5).Position = UDim2.new(0,230,0,70)
+yBtn("+", 0.5).Position = UDim2.new(0,280,0,70)
+
+-- FOV
+local fovLabel = Instance.new("TextLabel")
+fovLabel.Size = UDim2.new(0,50,0,25)
+fovLabel.Position = UDim2.new(0,170,0,40)
+fovLabel.BackgroundColor3 = Color3.fromRGB(30,30,30)
+fovLabel.Text = tostring(Settings.FOV)
+fovLabel.TextColor3 = Color3.fromRGB(220,220,220)
+fovLabel.Font = Enum.Font.GothamBold
+fovLabel.TextSize = 14
+fovLabel.Parent = panel
+Instance.new("UICorner",fovLabel).CornerRadius = UDim.new(0,4)
+
+local function fovBtn(sym,val)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0,25,0,25)
+    b.BackgroundColor3 = Color3.fromRGB(30,30,30)
+    b.Text = sym
+    b.TextColor3 = Color3.fromRGB(220,220,220)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 16
+    b.Parent = panel
+    Instance.new("UICorner",b).CornerRadius = UDim.new(0,4)
+    b.MouseButton1Click:Connect(function()
+        Settings.FOV = math.clamp(Settings.FOV + val,50,500)
+        fovLabel.Text = tostring(Settings.FOV)
+    end)
+    return b
+end
+fovBtn("-", -20).Position = UDim2.new(0,230,0,40)
+fovBtn("+", 20).Position = UDim2.new(0,280,0,40)
+
+-- Circle toggle for panel
+local circle = Instance.new("TextButton")
+circle.Size = UDim2.new(0,60,0,60)
+circle.Position = UDim2.new(1,-80,0,50)
+circle.BackgroundColor3 = Color3.fromRGB(200,20,20)
+circle.Text = "X"
+circle.TextColor3 = Color3.fromRGB(255,255,255)
+circle.Font = Enum.Font.GothamBold
+circle.TextSize = 14
+circle.Parent = gui
+Instance.new("UICorner",circle).CornerRadius = UDim.new(1,0)
+
+local dragStart, startPos
+circle.InputBegan:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        dragStart = i.Position
+        startPos = circle.Position
+    end
+end)
+UserInputService.InputChanged:Connect(function(i)
+    if dragStart and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+        local delta = i.Position - dragStart
+        circle.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+UserInputService.InputEnded:Connect(function(i)
+    if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+        dragStart = nil
+    end
+end)
+circle.MouseButton1Click:Connect(function()
+    panel.Visible = not panel.Visible
+    circle.Text = panel.Visible and "X" or "O"
+end)
+
+-- FOV Circle
+local fovCircle = Drawing.new("Circle")
+fovCircle.Thickness = 2
+fovCircle.Color = Color3.fromRGB(200,20,20)
+fovCircle.Filled = false
+fovCircle.Visible = false
+
+--// OPTIMIZED LOOPS
+-- AIMBOT (~20 Hz)
+task.spawn(function()
+    while true do
+        local cam = Camera
+        if not cam then task.wait(0.05) continue end
+
+        centerScreen = Vector2.new(cam.ViewportSize.X/2, cam.ViewportSize.Y/2)
+        ignoreList = {LocalPlayer.Character or {}}
+
+        targetPart = getTarget()
+
+        if Settings.Aimbot and targetPart and targetPart.Parent then
+            local ok, pos = pcall(function()
+                return targetPart.Position + Vector3.new(0, Settings.AimYOffset, 0)
+            end)
+            if ok and pos then
+                pcall(function()
+                    cam.CFrame = cam.CFrame:Lerp(CFrame.lookAt(cam.CFrame.Position, pos), Settings.AimLerp)
+                end)
+            end
+        end
+
+        pcall(function()
+            fovCircle.Position = centerScreen
+            fovCircle.Radius = Settings.FOV
+            fovCircle.Visible = Settings.Aimbot
+        end)
+
+        task.wait(0.05)
+    end
+end)
+
+-- ESP (~6 Hz)
+task.spawn(function()
+    while true do
+        local cam = Camera
+        if not cam then task.wait(0.15) continue end
+        centerScreen = Vector2.new(cam.ViewportSize.X/2, cam.ViewportSize.Y/2)
+        ignoreList = {LocalPlayer.Character or {}}
+
+        if Settings.ESP then
+            for plr, esp in pairs(espTable) do
+                local ok, char = pcall(function() return plr.Character end)
+                if not ok or not char then
+                    if esp.box then esp.box.Visible = false end
+                    if esp.line then esp.line.Visible = false end
+                else
+                    local hum = char:FindFirstChild("Humanoid")
+                    if hum and hum.Health > 0 and isEnemy(plr, false) then
+                        local root = getLockPart(char)
+                        if root and (cam.CFrame.Position - root.Position).Magnitude <= Settings.ESPRange then
+                            local ok2, rootPos, onScreen = pcall(function()
+                                return cam:WorldToViewportPoint(root.Position)
+                            end)
+                            if ok2 and onScreen then
+                                local ok3, headPos = pcall(function()
+                                    return cam:WorldToViewportPoint((char.Head or root).Position)
+                                end)
+                                if ok3 and headPos then
+                                    local h = math.abs(rootPos.Y - headPos.Y)
+                                    local w = h/2
+                                    if esp.box then
+                                        esp.box.Visible = true
+                                        esp.box.Size = Vector2.new(w,h)
+                                        esp.box.Position = Vector2.new(rootPos.X - w/2, math.min(rootPos.Y, headPos.Y))
+                                    end
+                                    if esp.line then
+                                        esp.line.Visible = true
+                                        esp.line.From = Vector2.new(centerScreen.X, cam.ViewportSize.Y)
+                                        esp.line.To = Vector2.new(rootPos.X, rootPos.Y)
+                                    end
+                                else
+                                    if esp.box then esp.box.Visible = false end
+                                    if esp.line then esp.line.Visible = false end
+                                end
+                            else
+                                if esp.box then esp.box.Visible = false end
+                                if esp.line then esp.line.Visible = false end
+                            end
+                        else
+                            if esp.box then esp.box.Visible = false end
+                            if esp.line then esp.line.Visible = false end
+                        end
+                    else
+                        if esp.box then esp.box.Visible = false end
+                        if esp.line then esp.line.Visible = false end
+                    end
+                end
+            end
+        else
+            for _, esp in pairs(espTable) do
+                if esp.box then esp.box.Visible = false end
+                if esp.line then esp.line.Visible = false end
+            end
+        end
+
+        task.wait(0.15)
+    end
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(1)
+    updatePlayerCache()
+end)
+
+print("GODLOCK v20 LOADED - Optimized, safe loops, GUI fixed")
